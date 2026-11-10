@@ -10,6 +10,14 @@ on:
   schedule:
     - cron: "5,35 10-23 * * 1-6"   # em UTC; = 7h05–20h35 em Brasília (UTC−3), seg a sáb
   workflow_dispatch: {}            # botão "Run workflow" para rodar na hora
+  push:                            # mudança no painel/rotina publica na hora, sem esperar o horário
+    branches: [main]
+    paths:
+      - "painel/**"
+      - "coletor/**"
+      - "config/**"
+      - "requirements.txt"
+      - ".github/workflows/painel-tv.yml"
 
 permissions:
   contents: read
