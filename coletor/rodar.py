@@ -45,7 +45,7 @@ import gerar_dados_tv as g  # noqa: E402
 
 BR = dt.timezone(dt.timedelta(hours=-3))
 ITERACOES = 200_000
-PAGINA = ("index.html", "mapa_uf.js", "logo_branca.png")
+PAGINA = ("index.html", "mapa_uf.js", "logo_branca.png", "tema.js", "tema_natal.js")
 CABECALHOS = {"ngrok-skip-browser-warning": "true", "User-Agent": "painel-tv/1 (rotina do painel do escritorio)"}
 
 
@@ -126,8 +126,13 @@ def main() -> int:
     estado = {"executado_em": dt.datetime.now(BR).isoformat(timespec="seconds"), "ok": False}
     tmpdir = Path(tempfile.mkdtemp(prefix="painel_tv_"))
     if a.pagina:                                   # a página vai sempre — mesmo que a coleta falhe
+        h = hashlib.sha1()
         for nome in PAGINA:
-            shutil.copy2(Path(a.pagina) / nome, saida / nome)
+            arq = Path(a.pagina) / nome
+            if arq.exists():
+                h.update(arq.read_bytes())
+                shutil.copy2(arq, saida / nome)
+        estado["pagina"] = h.hexdigest()[:12]      # a TV compara e recarrega sozinha quando a página muda
     try:
         chave = _env("TV_CHAVE")
         if len(chave) < 16:

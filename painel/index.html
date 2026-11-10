@@ -623,7 +623,7 @@ function rFrescor(d) {
 
 /* ============================== dados cifrados ============================== */
 // pacote {v, kdf:'pbkdf2-sha256', it, salt, iv, ct} gerado por coletor_subscricao.py (AES-256-GCM)
-let erroChave = false, rotinaErro = false;
+let erroChave = false, rotinaErro = false, versaoPagina = null;
 const _kdf = { salt: null, key: null };
 async function decifrar(p) {
   if (!(window.crypto && crypto.subtle)) throw new Error('sem WebCrypto (o endereço precisa ser https)');
@@ -663,7 +663,12 @@ async function carregar() {
     if (CFG.chave) {                                // rotina do GitHub: estado.json diz se a última coleta deu certo
       try {
         const e = await fetch(new URL('estado.json', u).toString() + '?_=' + Date.now(), { cache: 'no-store' });
-        rotinaErro = e.ok ? ((await e.json()).ok === false) : false;
+        const est = e.ok ? await e.json() : null;
+        rotinaErro = est ? est.ok === false : false;
+        if (est && est.pagina) {                    // página nova publicada (visual/tema) → recarrega sozinha, sem cache
+          if (!versaoPagina) versaoPagina = est.pagina;
+          else if (est.pagina !== versaoPagina) { const nu = new URL(location.href); nu.searchParams.set('v', est.pagina); location.replace(nu.toString()); return; }
+        }
       } catch (_) { rotinaErro = false; }
     }
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch (_) {}
@@ -682,6 +687,18 @@ setInterval(() => { if (DADOS && DADOS.corretoras) { cultVez++; const p = $('pCu
 setInterval(async () => {
   try { const r = await fetch(new URL(CFG.dados, location.href).toString() + (CFG.token ? '?k=' + encodeURIComponent(CFG.token) : ''), { cache: 'no-store' }); if (r.ok) location.reload(); } catch (_) {}
 }, CFG.reloadH * 36e5);
+</script>
+<script>
+// Tema visual: tema.js diz 'original' ou 'natal' (camada por cima, em tema_natal.js). ?tema=natal|original força para teste.
+// Sem tema.js (ex.: servidor antigo) fica o original.
+(function () {
+  const v = Math.floor(Date.now() / 300000);           // muda a cada 5 min: não fica preso no cache do Pages
+  const carregar = src => new Promise(ok => { const s = document.createElement('script'); s.src = src + '?_=' + v; s.onload = s.onerror = ok; document.body.appendChild(s); });
+  carregar('tema.js').then(() => {
+    const tema = new URLSearchParams(location.search).get('tema') || window.TEMA_ATIVO || 'original';
+    if (tema === 'natal') carregar('tema_natal.js');
+  });
+})();
 </script>
 </body>
 </html>
