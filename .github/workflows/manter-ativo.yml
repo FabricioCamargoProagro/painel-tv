@@ -1,5 +1,6 @@
 # O GitHub desliga rotinas agendadas de repositório público depois de 60 dias sem atividade.
 # Este fluxo grava uma linha por semana em estado/ativo.txt para a rotina do painel não parar sozinha.
+# Não precisa de segredo nem de ação manual.
 name: manter-ativo
 
 on:
