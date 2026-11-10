@@ -166,11 +166,12 @@ def _carregar_malha() -> dict:
 
 
 def _iso_brasilia(texto: str) -> dt.datetime:
-    """ISO → datetime em Brasília. Sem fuso, vale como hora de Brasília — é como a própria tela do
-    app de subscrição mostra a `data_geracao` (new Date(iso) num navegador no Brasil)."""
+    """ISO → datetime em Brasília. Sem fuso, vale como UTC: o backend do app grava a `data_geracao` em
+    UTC sem o sufixo (conferido em 10/11/2026 — a planilha baixada às 09:59 de Brasília é a versão
+    "12:58:54" do histórico, 3 h a mais)."""
     d = dt.datetime.fromisoformat(str(texto).replace("Z", "+00:00"))
     br = dt.timezone(dt.timedelta(hours=-3))
-    return d.replace(tzinfo=br) if d.tzinfo is None else d.astimezone(br)
+    return (d.replace(tzinfo=dt.timezone.utc) if d.tzinfo is None else d).astimezone(br)
 
 
 def _safra_inicio(s) -> float:
