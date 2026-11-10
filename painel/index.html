@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Painel da Operação</title>
+<!--
+  Painel da TV — operação + meta × realizado numa visão só (1920×1080, escala sozinho para qualquer tela).
+  Lê dados.json (gerado por scripts/gerar_dados_tv.py) a cada 5 min; recarrega a página a cada 6 h.
+  Parâmetros de URL (todos opcionais):
+    ?dados=<url do JSON>   (padrão: dados.json ao lado da página)
+    &k=<token>             (repassado ao JSON quando o servidor exige chave)
+    &lang=es               (rótulos em espanhol)    &moeda=USD&cambio=5.30  (valores em US$)
+    &refresh=300           (segundos entre leituras) &reload=6 (horas entre recargas da página)
+    &mapa=bolhas           (mapa antigo, bolhas por prêmio; o padrão pinta o município pela exposição)
+    &velho=24              (horas sem a planilha mudar até o selo ficar dourado)
+    #k=<frase-chave>       (modo cifrado da rotina do GitHub: lê dados.enc.json e decifra no navegador;
+                            o que vem depois do # nunca é enviado ao servidor)
+-->
+<style>
+:root{
+  --bg:#061a10; --panel:#0c2517; --panel-2:#10301e; --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.14);
+  --ink:#eef6f0; --ink-2:#b9cfc1; --muted:#83a191;
+  --good:#3DAE2B; --bad:#C2452D; --cur:#D9A520; --serie:#2F9DB3; --ref:#e8eee9;
+  --brand:#00783F;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);overflow:hidden;cursor:none}
+body{font-family:Roboto,"Segoe UI",system-ui,Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+#palco{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;padding:20px 40px 14px;
+  background:radial-gradient(1200px 700px at 78% -10%,rgba(61,174,43,.10),transparent 60%),var(--bg)}
+.num{font-variant-numeric:tabular-nums}
+
+/* ---------- cabeçalho ---------- */
+header{height:72px;display:flex;align-items:center;gap:22px}
+header img{height:42px;display:block}
+header .div{width:1px;height:44px;background:var(--line-2)}
+header h1{font-size:34px;font-weight:800;letter-spacing:-.3px;line-height:1}
+header .sub{font-size:19px;color:var(--muted);margin-top:6px;letter-spacing:.2px}
+header .dir{margin-left:auto;display:flex;align-items:center;gap:22px}
+#relogio{text-align:right}
+#hora{font-size:42px;font-weight:700;line-height:1;letter-spacing:-.5px}
+#data{font-size:18px;color:var(--ink-2);margin-top:4px}
+.chip b{color:var(--ink);font-weight:700}
+.chip{display:inline-flex;align-items:center;gap:10px;padding:8px 16px;border-radius:999px;font-size:17px;
+  background:var(--panel);border:1px solid var(--line-2);color:var(--ink-2)}
+.chip i{width:12px;height:12px;border-radius:50%;background:var(--good);display:block}
+.chip.velho i{background:var(--cur)} .chip.off i{background:var(--bad)}
+
+/* ---------- KPIs ---------- */
+#kpis{height:146px;margin-top:14px;display:grid;grid-template-columns:500px repeat(5,1fr);gap:18px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 20px;position:relative;overflow:hidden}
+.kpi .lbl{font-size:17px;font-weight:700;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .val{font-size:46px;font-weight:800;letter-spacing:-.8px;line-height:1.05;margin-top:8px;white-space:nowrap}
+.kpi .val small{font-size:.5em;font-weight:700;color:var(--ink-2);letter-spacing:0;margin:0 .14em}
+.kpi .val small:first-child{margin-left:0}
+.kpi .cmp{font-size:17px;color:var(--ink-2);margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi.hero{background:linear-gradient(135deg,#0f3a22,#0c2517 70%);border-color:rgba(61,174,43,.35)}
+.kpi.hero{padding-top:12px;padding-bottom:10px}
+.kpi.hero .val{font-size:52px;line-height:1;margin-top:6px}
+.kpi.hero .linha{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.kpi.hero .pm{text-align:right;line-height:1}
+.kpi.hero .pm b{display:block;font-size:32px;font-weight:800;color:var(--good)}
+.kpi.hero .pm span{font-size:15px;color:var(--muted)}
+.kpi.hero .cmp{margin-top:6px}
+.barra{height:10px;border-radius:5px;background:rgba(255,255,255,.10);margin-top:10px;overflow:hidden;position:relative}
+.barra b{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--good)}
+
+/* ---------- corpo ---------- */
+main{height:736px;margin-top:16px;display:grid;grid-template-columns:1196px minmax(0,1fr);gap:24px;overflow:hidden}
+.esq{display:grid;grid-template-rows:410px minmax(0,1fr);gap:16px;min-height:0}
+.tres{display:grid;grid-template-columns:372px 420px minmax(0,1fr);gap:24px;min-height:0}
+.painel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 24px;position:relative;overflow:hidden}
+.ttl{display:flex;align-items:baseline;gap:14px}
+.ttl h2{font-size:18px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--ink-2);white-space:nowrap}
+.ttl .extra{margin-left:auto;font-size:17px;color:var(--ink-2);white-space:nowrap}
+.ttl .extra b{font-weight:800}
+.leg{display:flex;gap:22px;margin-top:10px;font-size:15px;color:var(--muted);flex-wrap:nowrap}
+.leg span{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.leg i{display:block;width:16px;height:12px;border-radius:3px}
+.pos{color:var(--good)} .neg{color:#e0806b}
+svg text{font-family:Roboto,"Segoe UI",system-ui,Arial,sans-serif}
+
+/* mês corrente */
+#pMes .grande{font-size:42px;font-weight:800;letter-spacing:-.6px;margin-top:12px;line-height:1.05}
+#pMes .grande small{display:block;font-size:16px;font-weight:700;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:1.2px}
+#pMes .barra{height:14px;margin-top:12px}
+#pMes .barra b{background:var(--cur)}
+#pMes .kv{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:17px;color:var(--ink-2);margin-top:9px;white-space:nowrap}
+#pMes .kv b{color:var(--ink);font-weight:700}
+#pMes .nota{font-size:15px;color:var(--muted);margin-top:2px;white-space:nowrap}
+
+/* linhas de barras (UF / cultura) */
+.rows{margin-top:12px;display:flex;flex-direction:column;gap:9px}
+.row{display:grid;align-items:center;gap:12px;font-size:19px}
+#pUf .rows{gap:6px;margin-top:10px}
+#pUf .row{grid-template-columns:44px 1fr 118px 62px;font-size:18px}
+#pUf .trk{height:14px}
+.row .k{font-weight:800;color:var(--ink)}
+.row .v{text-align:right;font-weight:700}
+.row .p{text-align:right;color:var(--muted);font-size:17px}
+.trk{height:16px;position:relative;border-radius:4px;background:rgba(255,255,255,.05)}
+.trk b{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0;background:var(--serie)}
+.trk s{position:absolute;top:-4px;bottom:-4px;width:3px;margin-left:-1px;background:var(--ref);border-radius:2px;opacity:.9;text-decoration:none}
+#pCult .row{grid-template-columns:minmax(0,1fr) 112px;row-gap:5px}
+#pCult .row .trk{grid-column:1 / span 2;height:12px}
+#pCult .row .k{font-weight:700;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pCult .row .k small{color:var(--muted);font-weight:500;font-size:16px;margin-left:6px}
+.rodape{position:absolute;left:24px;right:24px;bottom:14px;font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fade{transition:opacity .6s}
+
+/* mapa */
+#pMapa .top{margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:4px 18px}
+#pMapa .top div{font-size:16px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pMapa .top b{color:var(--ink);font-weight:700}
+.legmapa{display:flex;flex-wrap:wrap;align-items:center;gap:4px 11px;margin-top:8px;font-size:14.5px;color:var(--ink-2);white-space:nowrap}
+.legmapa b{color:var(--muted);font-weight:700}
+.legmapa span{display:inline-flex;align-items:center;gap:6px}
+.legmapa i{display:block;width:22px;height:13px;border-radius:3px}
+
+/* letreiro */
+footer{height:48px;margin-top:14px;display:flex;align-items:stretch;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+footer .rot{flex:0 0 auto;display:flex;align-items:center;padding:0 20px;font-size:15px;font-weight:800;letter-spacing:1.6px;
+  text-transform:uppercase;color:#1b1400;background:var(--cur)}
+footer .trilho{flex:1;overflow:hidden;position:relative;display:flex;align-items:center}
+footer .faixa{display:inline-flex;white-space:nowrap;will-change:transform;animation:rolar linear infinite}
+footer .item{font-size:19px;color:var(--ink-2);padding:0 34px;position:relative}
+footer .item b{color:var(--ink);font-weight:700}
+footer .item:after{content:"";position:absolute;right:-4px;top:50%;width:7px;height:7px;margin-top:-3px;border-radius:50%;background:var(--serie)}
+@keyframes rolar{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+#aviso{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:34px;color:var(--ink-2);background:var(--bg)}
+</style>
+</head>
+<body>
+<div id="palco">
+  <header>
+    <img src="logo_branca.png" alt="ProAgro Seguros">
+    <div class="div"></div>
+    <div>
+      <h1 id="titulo">Operação</h1>
+      <div class="sub" id="subtitulo"></div>
+    </div>
+    <div class="dir">
+      <span class="chip" id="chipHoje" style="display:none"></span>
+      <span class="chip" id="frescor"><i></i><span>carregando…</span></span>
+      <div id="relogio"><div id="hora">--:--</div><div id="data"></div></div>
+    </div>
+  </header>
+
+  <section id="kpis"></section>
+
+  <main>
+    <div class="esq">
+      <div class="painel" id="pMeta"></div>
+      <div class="tres">
+        <div class="painel" id="pMes"></div>
+        <div class="painel" id="pUf"></div>
+        <div class="painel fade" id="pCult"></div>
+      </div>
+    </div>
+    <div class="painel" id="pMapa"></div>
+  </main>
+
+  <footer>
+    <div class="rot" id="rotUlt">Últimas emissões</div>
+    <div class="trilho"><div class="faixa" id="faixa"></div></div>
+  </footer>
+  <div id="aviso">carregando…</div>
+</div>
+
+<script src="mapa_uf.js"></script>
+<script>
+'use strict';
+/* ============================== configuração ============================== */
+const Q = new URLSearchParams(location.search);
+const CFG = {
+  dados: Q.get('dados') || 'dados.json',
+  token: Q.get('k') || '',
+  lang: /^es/i.test(Q.get('lang') || '') ? 'es' : 'pt',
+  moeda: /^usd$/i.test(Q.get('moeda') || '') ? 'USD' : 'BRL',
+  cambio: parseFloat(Q.get('cambio')) || 5.30,
+  refreshS: Math.max(60, parseInt(Q.get('refresh'), 10) || 300),
+  reloadH: Math.max(1, parseFloat(Q.get('reload')) || 6),
+  mapa: /^bolhas$/i.test(Q.get('mapa') || '') ? 'bolhas' : 'exposicao',
+  velhoH: Math.max(1, parseFloat(Q.get('velho')) || 24),    // horas sem a planilha mudar até o selo ficar dourado
+  // modo cifrado (rotina do GitHub): a chave vem DEPOIS do # e o navegador nunca a envia ao servidor
+  chave: new URLSearchParams(location.hash.slice(1)).get('k') || '',
+};
+if (CFG.chave && !Q.get('dados')) CFG.dados = 'dados.enc.json';
+const CACHE_KEY = 'painelTV.dados';
+
+/* ============================== textos PT / ES ============================== */
+const TX = {
+  pt: {
+    titulo: 'Operação {0}', subtitulo: 'Garantia de Produção · realizado × BP {0}',
+    premio: 'Prêmio emitido · {0}', da_meta_c: 'da meta do ano', meta_anual: 'meta anual {0}', faltam: 'faltam {0}', superada: 'meta superada em {0}',
+    apolices: 'Apólices', meta_apol: 'meta {0} · {1}%', subv_fed: 'Subvenção federal', subv_est: 'Subvenção estadual',
+    do_premio: '{0}% do prêmio', so_sp: 'SP · {0}% do prêmio', area: 'Área segurada', municipios: '{0} municípios',
+    is: 'Importância segurada', taxa: 'taxa média {0}%',
+    meta_real: 'Meta × realizado por mês', pos_acum: 'Posição acumulada', no_ano: 'No ano',
+    leg_base: 'Meta base', leg_hit: 'Realizado ≥ meta', leg_miss: 'Realizado < meta', leg_cur: 'Mês corrente (parcial)', leg_aj: 'Meta ajustada (com saldo)',
+    l_real: 'Realizado', l_meta: 'Meta base',
+    mes_corr: '{0} · mês corrente', faltam_mes: 'Faltam no mês', batida: 'Meta do mês batida', de: '{0} de {1} ({2}%)',
+    k_real: 'Realizado', k_meta_aj: 'Meta ajustada', k_nota: 'base {0} {1} saldo rolado {2}',
+    k_precisa: 'Precisa por dia útil ({0} dias)', k_ritmo: 'Ritmo atual por dia útil',
+    hoje: 'Hoje', hoje_1: '{0} apólice · {1}', hoje_n: '{0} apólices · {1}', sete: 'Últimos 7 dias: <b>{0}</b> apólices · <b>{1}</b>',
+    por_uf: 'Por UF', uf_leg: 'barra = prêmio · traço = meta do ano', por_cult: 'Por cultura', cult_leg: 'nº de apólices · prêmio', apols: '{0} apólices',
+    corretoras: 'Maiores corretoras', onde: 'Onde estamos', onde_sub: '{0} municípios · {1} UFs', top: 'Maiores municípios',
+    exposicao: 'Exposição por município', exp_sub: 'importância segurada · {0} mun.', leg_is: 'I.S. ({0})', top_exp: 'Maiores exposições',
+    ultimas: 'Últimas emissões', dados_de: 'planilha de {0} · conferido {1}', sem_conexao: 'sem conexão · planilha de {0}', velho: 'planilha parada desde {0} · conferido {1}',
+    carregando: 'carregando…', sem_meta: 'Meta {0} ainda não carregada no painel', sem_dados: 'Aguardando os dados do painel…',
+    chave_errada: 'Chave do painel incorreta — confira o endereço da TV (a parte depois de #k=)', chave_chip: 'chave incorreta · planilha de {0}',
+    rotina_erro: 'rotina com erro · planilha de {0}',
+    criterio: 'Apólices aprovadas, pela data de subscrição · fonte: Gestão de Propostas (API da matriz)',
+    parcial: 'parcial', mi: 'mi', mil: 'mil', bi: 'bi', ha: 'ha', mil_ha: 'mil ha',
+    meses: ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'],
+    mesesL: ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'],
+    locale: 'pt-BR',
+  },
+  es: {
+    titulo: 'Operación {0}', subtitulo: 'Garantía de Producción · real × BP {0}',
+    premio: 'Prima emitida · {0}', da_meta_c: 'de la meta del año', meta_anual: 'meta anual {0}', faltam: 'faltan {0}', superada: 'meta superada en {0}',
+    apolices: 'Pólizas', meta_apol: 'meta {0} · {1}%', subv_fed: 'Subvención federal', subv_est: 'Subvención estatal',
+    do_premio: '{0}% de la prima', so_sp: 'SP · {0}% de la prima', area: 'Área asegurada', municipios: '{0} municipios',
+    is: 'Suma asegurada', taxa: 'tasa media {0}%',
+    meta_real: 'Meta × real por mes', pos_acum: 'Posición acumulada', no_ano: 'En el año',
+    leg_base: 'Meta base', leg_hit: 'Real ≥ meta', leg_miss: 'Real < meta', leg_cur: 'Mes en curso (parcial)', leg_aj: 'Meta ajustada (con saldo)',
+    l_real: 'Real', l_meta: 'Meta base',
+    mes_corr: '{0} · mes en curso', faltam_mes: 'Faltan en el mes', batida: 'Meta del mes cumplida', de: '{0} de {1} ({2}%)',
+    k_real: 'Real', k_meta_aj: 'Meta ajustada', k_nota: 'base {0} {1} saldo arrastrado {2}',
+    k_precisa: 'Necesita por día hábil ({0} días)', k_ritmo: 'Ritmo actual por día hábil',
+    hoje: 'Hoy', hoje_1: '{0} póliza · {1}', hoje_n: '{0} pólizas · {1}', sete: 'Últimos 7 días: <b>{0}</b> pólizas · <b>{1}</b>',
+    por_uf: 'Por estado', uf_leg: 'barra = prima · trazo = meta del año', por_cult: 'Por cultivo', cult_leg: 'nº de pólizas · prima', apols: '{0} pólizas',
+    corretoras: 'Mayores corredurías', onde: 'Dónde estamos', onde_sub: '{0} municipios · {1} estados', top: 'Mayores municipios',
+    exposicao: 'Exposición por municipio', exp_sub: 'suma asegurada · {0} mun.', leg_is: 'S.A. ({0})', top_exp: 'Mayores exposiciones',
+    ultimas: 'Últimas emisiones', dados_de: 'planilla de {0} · revisado {1}', sem_conexao: 'sin conexión · planilla de {0}', velho: 'planilla sin cambios desde {0} · revisado {1}',
+    carregando: 'cargando…', sem_meta: 'Meta {0} aún no cargada en el panel', sem_dados: 'Esperando los datos del panel…',
+    chave_errada: 'Clave del panel incorrecta — revise la dirección de la TV (lo que va después de #k=)', chave_chip: 'clave incorrecta · planilla de {0}',
+    rotina_erro: 'rutina con error · planilla de {0}',
+    criterio: 'Pólizas aprobadas, por fecha de suscripción · fuente: Gestión de Propuestas (API de la matriz)',
+    parcial: 'parcial', mi: 'M', mil: 'mil', bi: 'mil M', ha: 'ha', mil_ha: 'mil ha',
+    meses: ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'],
+    mesesL: ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'],
+    locale: 'es-MX',
+  },
+};
+const CULT_ES = {'Soja':'Soja','Milho 2ª safra':'Maíz 2ª cosecha','Milho 1ª safra':'Maíz 1ª cosecha','Milho':'Maíz','Trigo':'Trigo','Sorgo':'Sorgo','Cevada':'Cebada','Arroz':'Arroz','Feijão':'Frijol','Canola':'Canola','Aveia':'Avena'};
+const L = TX[CFG.lang];
+const t = (k, ...a) => String(L[k] ?? k).replace(/\{(\d)\}/g, (_, i) => a[+i] ?? '');
+const cult = c => CFG.lang === 'es' ? (CULT_ES[c] || c) : c;
+
+/* ============================== números ============================== */
+// número sempre no formato da casa (vírgula decimal), também em espanhol
+const nf = (v, d = 0) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+const conv = v => CFG.moeda === 'USD' ? (v || 0) / CFG.cambio : (v || 0);
+const SYM = () => CFG.moeda === 'USD' ? 'US$' : 'R$';
+function partes(v, casas) {              // [sinal, número, unidade] já convertidos
+  v = conv(v); const a = Math.abs(v), s = v < 0 ? '−' : '';
+  if (a >= 1e9) return [s, nf(a / 1e9, casas ?? 2), t('bi')];
+  if (a >= 1e6) return [s, nf(a / 1e6, casas ?? (a >= 1e8 ? 0 : a >= 1e7 ? 1 : 2)), t('mi')];
+  if (a >= 1e3) return [s, nf(a / 1e3, 0), t('mil')];
+  return [s, nf(a, 0), ''];
+}
+function money(v, casas) {               // R$ 31,29 mi · R$ 326 mil · R$ 940
+  const [s, n, u] = partes(v, casas); return `${s}${SYM()} ${n}${u ? ' ' + u : ''}`;
+}
+function moneyH(v, casas) {              // versão para número grande: símbolo e unidade menores
+  const [s, n, u] = partes(v, casas); return `<small>${s}${SYM()}</small>${n}${u ? `<small>${u}</small>` : ''}`;
+}
+function eixo(v) {                       // marcas do eixo: 0 · 2,5 mi · 5 mi · 10 mi
+  v = conv(v); const a = Math.abs(v);
+  if (a >= 1e6) return `${nf(a / 1e6, Number.isInteger(+(a / 1e6).toFixed(1)) ? 0 : 1)} ${t('mi')}`;
+  if (a >= 1e3) return `${nf(a / 1e3, 0)} ${t('mil')}`;
+  return nf(a, 0);
+}
+function curto(v) {                      // sem símbolo, para eixos e linhas de valores: 9,91 mi · 741 mil
+  v = conv(v); const a = Math.abs(v), s = v < 0 ? '−' : '';
+  if (a >= 1e6) return `${s}${nf(a / 1e6, a >= 1e7 ? 1 : 2)} ${t('mi')}`;
+  if (a >= 1e3) return `${s}${nf(a / 1e3, 0)} ${t('mil')}`;
+  return a ? `${s}${nf(a, 0)}` : '0';
+}
+const pct = (v, d = 0) => nf(v, d);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const $ = id => document.getElementById(id);
+const dataBR = iso => { const [y, m, d] = String(iso).slice(0, 10).split('-'); return `${d}/${m}`; };
+
+/* ============================== escala do palco ============================== */
+function escalar() {
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  const p = $('palco');
+  p.style.transform = `translate(${(innerWidth - 1920 * s) / 2}px,${(innerHeight - 1080 * s) / 2}px) scale(${s})`;
+}
+addEventListener('resize', escalar); escalar();
+
+/* ============================== relógio ============================== */
+function relogio() {
+  const n = new Date();
+  $('hora').textContent = n.toLocaleTimeString(L.locale, { hour: '2-digit', minute: '2-digit' });
+  const dt = n.toLocaleDateString(L.locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  $('data').textContent = dt.charAt(0).toUpperCase() + dt.slice(1);
+}
+relogio(); setInterval(relogio, 10000);
+
+/* ============================== cabeçalho e KPIs ============================== */
+function rCabecalho(d) {
+  $('titulo').textContent = t('titulo', d.ano);
+  $('subtitulo').textContent = t('subtitulo', d.ano);
+  $('rotUlt').textContent = t('ultimas');
+  const h = d.ritmo && d.ritmo.hoje, ch = $('chipHoje');
+  const hojeLocal = new Date(); const iso = `${hojeLocal.getFullYear()}-${String(hojeLocal.getMonth() + 1).padStart(2, '0')}-${String(hojeLocal.getDate()).padStart(2, '0')}`;
+  if (h && d.hoje === iso) {                 // só mostra "hoje" se os dados forem de hoje
+    ch.innerHTML = `${t('hoje')}: ${t(h.apolices === 1 ? 'hoje_1' : 'hoje_n', '<b>' + nf(h.apolices) + '</b>', '<b>' + money(h.premio) + '</b>')}`;
+    ch.style.display = '';
+  } else ch.style.display = 'none';
+}
+
+function rKpis(d) {
+  const k = d.kpis, m = d.meta;
+  const pctMeta = m.tem_meta ? m.pct_ano : null;
+  const falta = m.tem_meta ? m.meta_ano - m.realizado_ano : 0;
+  const hero = `
+    <div class="kpi hero">
+      <div class="lbl">${t('premio', d.ano)}</div>
+      <div class="linha"><div class="val">${moneyH(k.premio, 2)}</div>
+        ${m.tem_meta ? `<div class="pm"><b>${pct(pctMeta, 1)}%</b><span>${t('da_meta_c')}</span></div>` : ''}</div>
+      ${m.tem_meta ? `<div class="barra"><b style="width:${Math.min(100, pctMeta)}%"></b></div>
+      <div class="cmp">${t('meta_anual', money(m.meta_ano, 2))} · ${falta > 0 ? t('faltam', money(falta)) : t('superada', money(-falta))}</div>`
+      : `<div class="cmp">${t('sem_meta', d.ano)}</div>`}
+    </div>`;
+  const tile = (lbl, val, cmp) => `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${val}</div><div class="cmp">${cmp}</div></div>`;
+  const pP = v => k.premio ? pct(v / k.premio * 100, 1) : '0';
+  const area = k.area_ha >= 1e4 ? `${nf(k.area_ha / 1000, 1)}<small>${t('mil_ha')}</small>` : `${nf(k.area_ha, 0)}<small>${t('ha')}</small>`;
+  $('kpis').innerHTML = hero
+    + tile(t('apolices'), nf(k.apolices), m.tem_meta && k.meta_apolices_ano ? t('meta_apol', nf(k.meta_apolices_ano), pct(k.apolices / k.meta_apolices_ano * 100)) : '&nbsp;')
+    + tile(t('subv_fed'), moneyH(k.subv_federal, 2), t('do_premio', pP(k.subv_federal)))
+    + tile(t('subv_est'), moneyH(k.subv_estadual, 2), t('so_sp', pP(k.subv_estadual)))
+    + tile(t('area'), area, t('municipios', nf(k.municipios)))
+    + tile(t('is'), moneyH(k.is, 0), t('taxa', pct(k.taxa_media, 2)));
+}
+
+/* ============================== meta × realizado ============================== */
+function rMeta(d) {
+  const m = d.meta, meses = d.meses, cur = m.mes_corrente - 1;
+  const pos = m.posicao_acum ?? 0;
+  const W = 1148, H = 330, pL = 92, pR = 8, pT = 16, base = 232;       // base = y do zero
+  const gw = (W - pL - pR) / 12, bw = Math.min(34, gw * 0.32);
+  const max = Math.max(1, ...meses.map(x => Math.max(x.meta_base, x.real)), meses[cur] ? meses[cur].meta_ajustada : 0) * 1.12;
+  const y = v => base - (base - pT) * (v / max);
+  // marcas "redondas" na moeda exibida (R$ ou US$), convertidas de volta para a escala em R$
+  const fx = CFG.moeda === 'USD' ? CFG.cambio : 1;
+  const passo = (() => { const r = max / fx / 4, p = Math.pow(10, Math.floor(Math.log10(r))); return [1, 2, 2.5, 5, 10].map(f => f * p).find(s => s >= r) * fx; })();
+  let g = `<defs><pattern id="hach" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="9" height="9" fill="#D9A520" opacity=".28"/><line x1="0" y1="0" x2="0" y2="9" stroke="#D9A520" stroke-width="4"/></pattern></defs>`;
+  for (let v = 0; v <= max + 1e-6; v += passo) {
+    g += `<line x1="${pL}" x2="${W - pR}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,${v ? .07 : .22})" stroke-width="1"/>`;
+    g += `<text x="${pL - 12}" y="${y(v) + 6}" text-anchor="end" font-size="16" fill="#83a191" class="num">${eixo(v)}</text>`;
+  }
+  meses.forEach((r, i) => {
+    const xc = pL + gw * (i + .5);
+    const hb = base - y(r.meta_base);
+    g += `<rect x="${xc - bw - 3}" y="${base - hb}" width="${bw}" height="${Math.max(hb, 0)}" rx="4" fill="rgba(232,238,233,.10)" stroke="rgba(232,238,233,.45)" stroke-width="1.5"/>`;
+    if (r.status !== 'futuro' && r.real > 0) {
+      const hr = base - y(r.real);
+      const cor = r.status === 'corrente' ? 'url(#hach)' : (!m.tem_meta ? 'var(--serie)' : (r.real >= r.meta_base ? 'var(--good)' : 'var(--bad)'));
+      g += `<rect x="${xc + 3}" y="${base - hr}" width="${bw}" height="${hr}" rx="4" fill="${cor}" ${r.status === 'corrente' ? 'stroke="#D9A520" stroke-width="2"' : ''}/>`;
+      if (r.status === 'fechado' && m.tem_meta) {                    // ícone = 2ª codificação do status
+        const up = r.real >= r.meta_base, yy = base - hr - 10;
+        g += up ? `<path d="M${xc + 3 + bw / 2 - 7},${yy} l7,-11 l7,11 z" fill="var(--good)"/>`
+                : `<path d="M${xc + 3 + bw / 2 - 7},${yy - 11} l14,0 l-7,11 z" fill="var(--bad)"/>`;
+      }
+    }
+    if (r.status === 'corrente' && r.meta_ajustada > 0) {
+      const ym = y(r.meta_ajustada);
+      g += `<line x1="${xc - bw - 12}" x2="${xc + bw + 12}" y1="${ym}" y2="${ym}" stroke="#D9A520" stroke-width="3" stroke-dasharray="7 5"/>`;
+      g += `<text x="${xc}" y="${ym - 10}" text-anchor="middle" font-size="16" font-weight="800" fill="#e9c35a" class="num">${curto(r.meta_ajustada)}</text>`;
+    }
+    const corM = i === cur ? '#e9c35a' : (r.status === 'futuro' ? '#6e8a7b' : '#eef6f0');
+    g += `<text x="${xc}" y="${base + 26}" text-anchor="middle" font-size="18" font-weight="${i === cur ? 800 : 700}" fill="${corM}">${L.meses[i]}</text>`;
+    const vr = r.status === 'futuro' ? '—' : curto(r.real);
+    g += `<text x="${xc}" y="${base + 56}" text-anchor="middle" font-size="17" font-weight="700" fill="${r.status === 'futuro' ? '#5f7b6c' : (i === cur ? '#e9c35a' : '#eef6f0')}" class="num">${vr}</text>`;
+    g += `<text x="${xc}" y="${base + 84}" text-anchor="middle" font-size="16" fill="#83a191" class="num">${curto(r.meta_base)}</text>`;
+  });
+  g += `<text x="6" y="${base + 56}" font-size="15" font-weight="700" fill="#b9cfc1">${t('l_real')}</text>`;
+  g += `<text x="6" y="${base + 84}" font-size="15" fill="#83a191">${t('l_meta')}</text>`;
+
+  const extra = m.tem_meta
+    ? `${t('pos_acum')} <b class="${pos >= 0 ? 'pos' : 'neg'}">${pos >= 0 ? '+' : ''}${money(pos)}</b> &nbsp;·&nbsp; ${t('no_ano')} <b>${pct(m.pct_ano, 1)}%</b>`
+    : `<span class="neg">${t('sem_meta', d.ano)}</span>`;
+  $('pMeta').innerHTML = `
+    <div class="ttl"><h2>${t('meta_real')} · ${d.ano}</h2><div class="extra">${extra}</div></div>
+    <div class="leg" ${m.tem_meta ? '' : 'style="visibility:hidden"'}>
+      <span><i style="background:rgba(232,238,233,.10);border:1.5px solid rgba(232,238,233,.45)"></i>${t('leg_base')}</span>
+      <span><i style="background:var(--good)"></i>▲ ${t('leg_hit')}</span>
+      <span><i style="background:var(--bad)"></i>▼ ${t('leg_miss')}</span>
+      <span><i style="background:url(#);background:repeating-linear-gradient(45deg,#D9A520 0 4px,rgba(217,165,32,.28) 4px 9px)"></i>${t('leg_cur')}</span>
+      <span><i style="height:0;border-top:3px dashed #D9A520;border-radius:0;width:22px"></i>${t('leg_aj')}</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;margin-top:8px">${g}</svg>`;
+}
+
+/* ============================== mês corrente ============================== */
+function rMes(d) {
+  const m = d.meta, x = m.mes, r = d.ritmo;
+  const nome = L.mesesL[m.mes_corrente - 1];
+  if (!m.tem_meta) {
+    $('pMes').innerHTML = `<div class="ttl"><h2>${t('mes_corr', nome)}</h2></div>
+      <div class="grande"><small>${t('l_real')}</small>${money(r.mes_atual.premio, 2)}</div>
+      <div class="lin">${t('sete', nf(r.ultimos_7_dias.apolices), money(r.ultimos_7_dias.premio))}</div>`;
+    return;
+  }
+  const falta = x.falta ?? (x.meta_ajustada - x.real);
+  const p = x.meta_ajustada > 0 ? Math.max(0, Math.min(100, x.real / x.meta_ajustada * 100)) : 100;
+  const saldo = x.saldo_rolado;
+  const kv = (k, v) => `<div class="kv"><span>${k}</span><b class="num">${v}</b></div>`;
+  $('pMes').innerHTML = `
+    <div class="ttl"><h2>${t('mes_corr', nome)}</h2></div>
+    <div class="grande"><small>${falta > 0 ? t('faltam_mes') : t('batida')}</small><span class="${falta > 0 ? '' : 'pos'}">${falta > 0 ? money(falta, 2) : '+' + money(-falta, 2)}</span></div>
+    <div class="barra"><b style="width:${p}%"></b></div>
+    ${kv(t('k_real'), `${money(x.real, 2)} · ${pct(p)}%`)}
+    ${kv(t('k_meta_aj'), money(x.meta_ajustada, 2))}
+    ${saldo ? `<div class="nota">${t('k_nota', money(x.meta_base), saldo > 0 ? '+' : '−', money(Math.abs(saldo)))}</div>` : ''}
+    ${falta > 0 && x.dias_uteis_restantes ? kv(t('k_precisa', x.dias_uteis_restantes), money(x.ritmo_necessario_dia)) : ''}
+    ${x.ritmo_atual_dia ? kv(t('k_ritmo'), money(x.ritmo_atual_dia)) : ''}`;
+}
+
+/* ============================== por UF ============================== */
+function rUf(d) {
+  const ufs = d.ufs.slice(0, 8);
+  const esc_ = Math.max(1, ...ufs.map(u => Math.max(u.premio, u.meta_ano || 0)));
+  const linhas = ufs.map(u => `
+    <div class="row">
+      <span class="k">${esc(u.uf)}</span>
+      <span class="trk"><b style="width:${u.premio / esc_ * 100}%"></b>${u.meta_ano ? `<s style="left:${u.meta_ano / esc_ * 100}%"></s>` : ''}</span>
+      <span class="v num">${money(u.premio)}</span>
+      <span class="p num">${u.pct_meta != null ? pct(u.pct_meta) + '%' : ''}</span>
+    </div>`).join('');
+  $('pUf').innerHTML = `<div class="ttl"><h2>${t('por_uf')}</h2><div class="extra" style="font-size:14px;color:var(--muted)">${t('uf_leg')}</div></div>
+    <div class="rows">${linhas}</div>`;
+}
+
+/* ============================== por cultura / corretoras (alternam) ============================== */
+let cultVez = 0;
+function rCult(d) {
+  const mostrarCorretoras = Array.isArray(d.corretoras) && d.corretoras.length && (cultVez % 2 === 1);
+  if (mostrarCorretoras) {
+    const cs = d.corretoras.slice(0, 6), mx = Math.max(1, ...cs.map(c => c.premio));
+    $('pCult').innerHTML = `<div class="ttl"><h2>${t('corretoras')}</h2></div><div class="rows">` + cs.map(c => `
+      <div class="row"><span class="k">${esc(c.nome)}<small>${nf(c.apolices)}</small></span><span class="v num">${money(c.premio)}</span>
+      <span class="trk"><b style="width:${c.premio / mx * 100}%"></b></span></div>`).join('') + `</div>`;
+    return;
+  }
+  const cs = d.culturas.slice(0, 5), mx = Math.max(1, ...cs.map(c => c.premio));
+  $('pCult').innerHTML = `<div class="ttl"><h2>${t('por_cult')}</h2><div class="extra" style="font-size:14px;color:var(--muted)">${t('cult_leg')}</div></div><div class="rows">` + cs.map(c => `
+    <div class="row"><span class="k">${esc(cult(c.cultura))}<small>${nf(c.apolices)}</small></span><span class="v num">${money(c.premio)}</span>
+    <span class="trk"><b style="width:${c.premio / mx * 100}%"></b></span></div>`).join('') + `</div>`;
+}
+
+/* ============================== mapa ============================== */
+// ?mapa=bolhas → bolhas por prêmio (versão antiga); padrão → municípios pintados pela exposição (I.S.)
+function rMapa(d) { return CFG.mapa === 'bolhas' ? rMapaBolhas(d) : rMapaExposicao(d); }
+
+// malha do IBGE em inteiros delta (centésimos de grau): [x0,y0,dx,dy,...] → [[lon,lat],...]
+function decodAnel(a) {
+  let x = a[0], y = a[1]; const p = [[x / 100, y / 100]];
+  for (let i = 2; i < a.length - 1; i += 2) { x += a[i]; y += a[i + 1]; p.push([x / 100, y / 100]); }
+  return p;
+}
+// projeção equirretangular com correção pelo cosseno da latitude, enquadrada e centralizada
+function enquadrar(pontos, W, H, pad) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [lo, la] of pontos) { if (lo < x0) x0 = lo; if (lo > x1) x1 = lo; if (la < y0) y0 = la; if (la > y1) y1 = la; }
+  if (!isFinite(x0)) { x0 = -58; x1 = -44; y0 = -34; y1 = -14; }
+  x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+  const lat0 = (y0 + y1) / 2, kx = Math.cos(lat0 * Math.PI / 180);
+  const s = Math.min(W / ((x1 - x0) * kx), H / (y1 - y0)), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  return (lon, lat) => [W / 2 + (lon - cx) * kx * s, H / 2 - (lat - cy) * s];
+}
+// contorno das UFs: fundo (embaixo), traço (por cima dos municípios) e rótulos
+function camadaUF(P, W, H, ufsCom, corAtiva, corInativa) {
+  const MAPA = window.MAPA_UF || {};
+  let fundo = '', traco = '', rot = '';
+  for (const uf in MAPA) {
+    let maior = null, area = 0;
+    const dd = MAPA[uf].map(anel => {
+      let a = 0, sxx = 0, syy = 0;
+      const pp = anel.map(([lo, la]) => P(lo, la));
+      for (let i = 0, j = pp.length - 1; i < pp.length; j = i++) {
+        const c = pp[j][0] * pp[i][1] - pp[i][0] * pp[j][1]; a += c; sxx += (pp[j][0] + pp[i][0]) * c; syy += (pp[j][1] + pp[i][1]) * c;
+      }
+      if (Math.abs(a) > area) { area = Math.abs(a); maior = [sxx / (3 * a), syy / (3 * a)]; }
+      return 'M' + pp.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('L') + 'Z';
+    }).join('');
+    const ativo = ufsCom.has(uf);
+    fundo += `<path d="${dd}" fill="${ativo ? corAtiva : corInativa}"/>`;
+    traco += `<path d="${dd}" fill="none" stroke="rgba(255,255,255,${ativo ? .38 : .14})" stroke-width="${ativo ? 1.4 : 1}"/>`;
+    if (uf !== 'DF' && maior && maior[0] > 18 && maior[0] < W - 18 && maior[1] > 16 && maior[1] < H - 10) {
+      rot += `<text x="${maior[0]}" y="${maior[1] + 7}" text-anchor="middle" font-size="${ativo ? 20 : 16}" font-weight="800" letter-spacing="1.5"
+        fill="${ativo ? '#eef6f0' : '#5f7b6c'}" stroke="#0c2517" stroke-width="5" paint-order="stroke">${uf}</text>`;
+    }
+  }
+  return { fundo, traco, rot };
+}
+
+// rampa sequencial de um tom só (validada: ordinal, tema escuro); escuro = pouca exposição
+const RAMPA = ['#22636f', '#2b7f8c', '#3a9cab', '#62bccb', '#a8e0e6'];
+function redondo(x) {                    // número "redondo" mais próximo na escala 1 · 2,5 · 5 · 10
+  if (!(x > 0)) return 0;
+  const k = Math.floor(Math.log10(x)), m = x / 10 ** k;
+  return [1, 2.5, 5, 10].reduce((b, v) => Math.abs(Math.log10(v / m)) < Math.abs(Math.log10(b / m)) ? v : b, 1) * 10 ** k;
+}
+function quebras(vals) {                 // quartis + p92, arredondados; acompanha o ano (jan tem valores pequenos)
+  const v = vals.filter(x => x > 0).sort((a, b) => a - b);
+  if (v.length < 5) return [];
+  const q = p => v[Math.min(v.length - 1, Math.floor(p * v.length))];
+  return [...new Set([.25, .5, .75, .92].map(p => redondo(q(p))))].sort((a, b) => a - b);
+}
+
+function rMapaExposicao(d) {
+  const W = 572, H = 500, fx = CFG.moeda === 'USD' ? CFG.cambio : 1;
+  const ms = d.municipios, ufsCom = new Set(ms.map(m => m.uf));
+  const aneis = ms.map(m => (m.malha || []).flatMap(pol => pol.map(decodAnel)));
+  const pontos = aneis.flat(2);
+  const P = enquadrar(pontos.length ? pontos : ms.filter(m => m.lon != null).map(m => [m.lon, m.lat]), W, H, 0.6);
+  const uf = camadaUF(P, W, H, ufsCom, '#11291c', '#0e2419');
+  const br = quebras(ms.map(m => conv(m.is))), ncl = br.length + 1;
+  const corClasse = c => RAMPA[ncl > 1 ? Math.round(c * (RAMPA.length - 1) / (ncl - 1)) : RAMPA.length - 1];
+  const cor = v => corClasse(br.filter(b => conv(v) > b).length);
+  let g = uf.fundo;
+  ms.forEach((m, i) => {
+    if (aneis[i].length) {
+      const dd = aneis[i].map(a => 'M' + a.map(([lo, la]) => { const [x, y] = P(lo, la); return x.toFixed(1) + ',' + y.toFixed(1); }).join('L') + 'Z').join('');
+      g += `<path d="${dd}" fill="${cor(m.is)}" fill-rule="evenodd" stroke="#0c2517" stroke-width=".8"/>`;
+    } else if (m.lon != null) {                              // sem contorno: marca na sede
+      const [x, y] = P(m.lon, m.lat);
+      g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${cor(m.is)}" stroke="#0c2517" stroke-width="1"/>`;
+    }
+  });
+  g += uf.traco + uf.rot;
+  // legenda: "≤ 250 mil", "250–500 mil", "0,5–2,5 mi"... (unidade só no fim quando é a mesma)
+  const f = b => eixo(b * fx);
+  const par = (a, b) => {                 // 250–500 mil · 0,5–2,5 mi · 2,5–5 mi
+    const A = f(a), B = f(b), uB = B.split(' ').pop(), uA = A.split(' ').pop();
+    if (uA === uB) return `${A.slice(0, -uA.length - 1)}–${B}`;
+    if (uA === t('mil') && uB === t('mi')) {
+      const v = conv(a * fx) / 1e6;                            // 0,5 · 0,25 (sem arredondar 0,25 para 0,3)
+      return `${nf(v, Number.isInteger(+(v * 10).toFixed(6)) ? 1 : 2)}–${B}`;
+    }
+    return `${A}–${B}`;
+  };
+  const itens = [];
+  for (let c = 0; c < ncl; c++) {
+    const lbl = ncl === 1 ? '' : c === 0 ? `≤ ${f(br[0])}` : c === ncl - 1 ? `> ${f(br[ncl - 2])}` : par(br[c - 1], br[c]);
+    itens.push(`<span><i style="background:${corClasse(c)}"></i>${lbl}</span>`);
+  }
+  const top = ms.slice().sort((a, b) => b.is - a.is).slice(0, 6)
+    .map((p, i) => `<div>${i + 1}. <b>${esc(p.municipio)}/${esc(p.uf)}</b> · ${money(p.is)}</div>`).join('');
+  $('pMapa').innerHTML = `
+    <div class="ttl"><h2>${t('exposicao')}</h2><div class="extra">${t('exp_sub', nf(ms.length))}</div></div>
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;margin-top:10px">${g}</svg>
+    <div class="legmapa"><b>${t('leg_is', SYM())}</b>${itens.join('')}</div>
+    <div class="ttl" style="margin-top:8px"><h2 style="font-size:15px">${t('top_exp')}</h2></div>
+    <div class="top">${top}</div>`;
+}
+
+function rMapaBolhas(d) {
+  const W = 572, H = 528;
+  const pts = d.municipios.filter(m => m.lon != null && m.lat != null);
+  const ufsCom = new Set(d.municipios.map(m => m.uf));
+  const P = enquadrar(pts.map(p => [p.lon, p.lat]), W, H, 0.9);
+  const uf = camadaUF(P, W, H, ufsCom, '#15402a', '#0f2c1d');
+  let g = uf.fundo + uf.traco;
+  const pmax = Math.max(1, ...pts.map(p => p.premio));
+  const R = p => 3.5 + 24 * Math.sqrt(p / pmax);
+  pts.slice().sort((a, b) => b.premio - a.premio).forEach(p => {
+    const [x, y] = P(p.lon, p.lat);
+    g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${R(p.premio).toFixed(1)}" fill="#2F9DB3" fill-opacity=".62" stroke="#0c2517" stroke-width="2"/>`;
+  });
+  g += uf.rot;
+  // os nomes dos maiores municípios vão na lista abaixo do mapa (no mapa eles se sobrepõem)
+  // legenda de tamanho
+  const ref1 = pmax / 4, ref2 = pmax;
+  const top = d.municipios.slice(0, 6).map((p, i) => `<div>${i + 1}. <b>${esc(p.municipio)}/${esc(p.uf)}</b> · ${money(p.premio)}</div>`).join('');
+  $('pMapa').innerHTML = `
+    <div class="ttl"><h2>${t('onde')}</h2><div class="extra">${t('onde_sub', nf(d.kpis.municipios), ufsCom.size)}</div></div>
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;margin-top:10px">${g}
+      <g transform="translate(${W - 150},${H - 64})">
+        <circle cx="20" cy="${44 - R(ref1)}" r="${R(ref1)}" fill="none" stroke="#b9cfc1" stroke-width="1.5"/>
+        <circle cx="76" cy="${44 - R(ref2)}" r="${R(ref2)}" fill="none" stroke="#b9cfc1" stroke-width="1.5"/>
+        <text x="20" y="62" text-anchor="middle" font-size="13" fill="#83a191">${curto(ref1)}</text>
+        <text x="76" y="62" text-anchor="middle" font-size="13" fill="#83a191">${curto(ref2)}</text>
+      </g></svg>
+    <div class="ttl" style="margin-top:6px"><h2 style="font-size:15px">${t('top')}</h2></div>
+    <div class="top">${top}</div>`;
+}
+
+/* ============================== letreiro ============================== */
+function rTicker(d) {
+  const it = (d.ultimas || []).map(u =>
+    `<span class="item"><b>${dataBR(u.data)}</b> · ${esc(u.municipio)}/${esc(u.uf)} · ${esc(cult(u.cultura))} · ${nf(u.area_ha, 1)} ${t('ha')} · <b>${money(u.premio)}</b></span>`).join('');
+  const f = $('faixa');
+  f.innerHTML = it + it;                                   // conteúdo duplicado = volta sem emenda
+  requestAnimationFrame(() => { f.style.animationDuration = Math.max(30, f.scrollWidth / 2 / 70) + 's'; });
+}
+
+/* ============================== frescor dos dados ============================== */
+let ultimoOk = null, falhou = false;
+const hhmm = x => x.toLocaleTimeString(L.locale, { hour: '2-digit', minute: '2-digit' });
+const ddmmhh = x => `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')} ${hhmm(x)}`;
+function rFrescor(d) {
+  // a idade que importa é a da PLANILHA (no backend: a última vez que entrou proposta nova), não a do
+  // cálculo do JSON — senão o selo pareceria em dia com a planilha parada. "conferido" = última leitura ok.
+  const el = $('frescor'), fonte = new Date((d.fonte && d.fonte.arquivo_modificado_em) || d.gerado_em);
+  const quando = isNaN(fonte) ? '—' : ddmmhh(fonte);
+  const idadeH = isNaN(fonte) ? 99 : (Date.now() - fonte.getTime()) / 36e5;
+  const lido = ultimoOk ? hhmm(new Date(ultimoOk)) : '—';
+  const velho = idadeH > CFG.velhoH;
+  el.className = 'chip' + (falhou ? ' off' : (velho || rotinaErro) ? ' velho' : '');
+  el.querySelector('span').textContent = erroChave ? t('chave_chip', quando) : falhou ? t('sem_conexao', quando)
+    : rotinaErro ? t('rotina_erro', quando) : velho ? t('velho', quando, lido) : t('dados_de', quando, lido);
+}
+
+/* ============================== dados cifrados ============================== */
+// pacote {v, kdf:'pbkdf2-sha256', it, salt, iv, ct} gerado por coletor_subscricao.py (AES-256-GCM)
+let erroChave = false, rotinaErro = false;
+const _kdf = { salt: null, key: null };
+async function decifrar(p) {
+  if (!(window.crypto && crypto.subtle)) throw new Error('sem WebCrypto (o endereço precisa ser https)');
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  if (_kdf.salt !== p.salt) {                      // o sal muda a cada publicação; deriva a chave de novo
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(CFG.chave), 'PBKDF2', false, ['deriveKey']);
+    _kdf.key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(p.salt), iterations: p.it || 200000, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    _kdf.salt = p.salt;
+  }
+  const claro = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(p.iv) }, _kdf.key, b64(p.ct));
+  return JSON.parse(new TextDecoder().decode(claro));
+}
+
+/* ============================== ciclo de leitura ============================== */
+let DADOS = null;
+function render(d) {
+  DADOS = d;
+  try {
+    rCabecalho(d); rKpis(d); rMeta(d); rMes(d); rUf(d); rCult(d); rMapa(d); rTicker(d); rFrescor(d);
+    $('aviso').style.display = 'none';
+  } catch (e) { console.error('[painelTV] render', e); }
+}
+async function carregar() {
+  const u = new URL(CFG.dados, location.href);
+  if (CFG.token) u.searchParams.set('k', CFG.token);
+  u.searchParams.set('_', Date.now());
+  try {
+    const r = await fetch(u.toString(), { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    let d = await r.json();
+    if (d && d.ct) {                                // pacote cifrado (rotina do GitHub)
+      if (!CFG.chave) { erroChave = true; throw new Error('dados cifrados e o endereço não tem a chave (#k=…)'); }
+      try { d = await decifrar(d); } catch (e) { erroChave = true; throw e; }
+    }
+    erroChave = false; falhou = false; ultimoOk = Date.now();
+    if (CFG.chave) {                                // rotina do GitHub: estado.json diz se a última coleta deu certo
+      try {
+        const e = await fetch(new URL('estado.json', u).toString() + '?_=' + Date.now(), { cache: 'no-store' });
+        rotinaErro = e.ok ? ((await e.json()).ok === false) : false;
+      } catch (_) { rotinaErro = false; }
+    }
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch (_) {}
+    render(d);
+  } catch (e) {
+    console.warn('[painelTV] leitura falhou', e);
+    falhou = true;
+    if (!DADOS) { try { const c = localStorage.getItem(CACHE_KEY); if (c) render(JSON.parse(c)); } catch (_) {} }
+    if (DADOS) rFrescor(DADOS); else $('aviso').textContent = erroChave ? t('chave_errada') : t('sem_dados');
+  }
+}
+carregar();
+setInterval(carregar, CFG.refreshS * 1000);
+setInterval(() => { if (DADOS && DADOS.corretoras) { cultVez++; const p = $('pCult'); p.style.opacity = 0; setTimeout(() => { rCult(DADOS); p.style.opacity = 1; }, 600); } }, 20000);
+// recarga completa da página a cada N horas (pega versão nova do painel), só se a fonte responder
+setInterval(async () => {
+  try { const r = await fetch(new URL(CFG.dados, location.href).toString() + (CFG.token ? '?k=' + encodeURIComponent(CFG.token) : ''), { cache: 'no-store' }); if (r.ok) location.reload(); } catch (_) {}
+}, CFG.reloadH * 36e5);
+</script>
+</body>
+</html>

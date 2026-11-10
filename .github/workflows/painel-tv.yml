@@ -1,0 +1,69 @@
+# Rotina do painel da TV do escritório (provisória, até o backend do app ter a rota /tv/).
+# A cada 30 min, das 7h às 20h de Brasília, de segunda a sábado: entra no app de subscrição, pega a
+# versão mais recente da planilha de Gestão de Propostas, gera os agregados, cifra e publica no Pages.
+# A planilha (com dado pessoal) só existe dentro do runner e é apagada no fim; o que vai para o Pages
+# é a página + dados.enc.json (cifrado) + estado.json (sem dado de negócio).
+name: painel-tv
+
+on:
+  schedule:
+    - cron: "5,35 10-23 * * 1-6"   # em UTC; = 7h05–20h35 em Brasília (UTC−3), seg a sáb
+  workflow_dispatch: {}            # botão "Run workflow" para rodar na hora
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: painel-tv
+  cancel-in-progress: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.publicar.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      # se a coleta falhar, a TV continua com os últimos dados bons (e avisa "rotina com erro")
+      - name: Guardar os últimos dados publicados
+        run: |
+          mkdir -p site
+          curl -fsS "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/dados.enc.json" \
+            -o site/dados.enc.json || rm -f site/dados.enc.json
+
+      - name: Coletar, gerar e cifrar
+        id: coletar
+        continue-on-error: true
+        env:
+          SUBSCRICAO_URL: ${{ secrets.SUBSCRICAO_URL }}
+          SUBSCRICAO_EMAIL: ${{ secrets.SUBSCRICAO_EMAIL }}
+          SUBSCRICAO_SENHA: ${{ secrets.SUBSCRICAO_SENHA }}
+          TV_CHAVE: ${{ secrets.TV_CHAVE }}
+          TV_METAS: ${{ secrets.TV_METAS }}
+        run: python coletor/rodar.py --saida site --pagina painel
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: publicar
+        uses: actions/deploy-pages@v4
+
+      - name: Marcar a execução como falha (a coleta falhou — ver o passo "Coletar, gerar e cifrar")
+        if: steps.coletar.outcome == 'failure'
+        run: exit 1
