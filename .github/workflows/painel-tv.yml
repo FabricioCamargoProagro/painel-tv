@@ -3,6 +3,7 @@
 # versão mais recente da planilha de Gestão de Propostas, gera os agregados, cifra e publica no Pages.
 # A planilha (com dado pessoal) só existe dentro do runner e é apagada no fim; o que vai para o Pages
 # é a página + dados.enc.json (cifrado) + estado.json (sem dado de negócio).
+# Para rodar na hora: Actions → painel-tv → Run workflow.
 name: painel-tv
 
 on:
