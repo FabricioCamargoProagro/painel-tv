@@ -35,8 +35,9 @@
     @keyframes acender{from{opacity:.55}to{opacity:1}}
     .natal-neve{inset:0;z-index:40}
     .natal-neve i{position:absolute;top:-16px;display:block;animation:cair var(--t) linear var(--d) infinite}
-    .natal-neve i::after{content:"";display:block;width:var(--s);height:var(--s);border-radius:50%;background:#fff;opacity:var(--o);
-      box-shadow:0 0 4px rgba(255,255,255,.6);animation:balancar var(--b) ease-in-out var(--d) infinite alternate}
+    .natal-neve i::after{content:"•";display:block;font-family:Roboto,Arial,sans-serif;font-size:calc(var(--s) * 3);line-height:1;
+      color:rgba(255,255,255,var(--o));text-shadow:0 0 4px rgba(255,255,255,.7);
+      animation:balancar var(--b) ease-in-out var(--d) infinite alternate}
     @keyframes cair{from{transform:translateY(0)}to{transform:translateY(1110px)}}
     @keyframes balancar{from{transform:translateX(calc(var(--dx) * -1))}to{transform:translateX(var(--dx))}}
     .natal-treno{left:0;top:2px;width:680px;height:99px;z-index:50;transform:translateX(2000px);

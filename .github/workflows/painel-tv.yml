@@ -8,7 +8,9 @@ name: painel-tv
 
 on:
   schedule:
-    - cron: "5,35 10-23 * * 1-6"   # em UTC; = 7h05–20h35 em Brasília (UTC−3), seg a sáb
+    # em UTC; = 7h–20h50 em Brasília (UTC−3), seg a sáb, de 10 em 10 min. O GitHub pula boa parte dos horários
+    # agendados (em 10–12/11 rodou 4 de ~50); mais tentativas compensam. Minutos fora do :00, que é o mais disputado.
+    - cron: "3,13,23,33,43,53 10-23 * * 1-6"
   workflow_dispatch: {}            # botão "Run workflow" para rodar na hora
   push:                            # mudança no painel/rotina publica na hora, sem esperar o horário
     branches: [main]
