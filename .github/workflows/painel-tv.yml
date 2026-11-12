@@ -73,6 +73,17 @@ jobs:
           path: site
 
       - id: publicar
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      # o Pages às vezes responde "No artifacts named github-pages were found… re-run later" (falha passageira
+      # do GitHub, vista em 12/11): espera e tenta de novo uma vez antes de desistir
+      - name: Esperar antes de tentar publicar de novo
+        if: steps.publicar.outcome == 'failure'
+        run: sleep 45
+
+      - id: publicar2
+        if: steps.publicar.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
       - name: Marcar a execução como falha (a coleta falhou — ver o passo "Coletar, gerar e cifrar")
